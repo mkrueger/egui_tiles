@@ -1,6 +1,5 @@
 use egui::{
-    vec2, Color32, Id, Rect, Response, Rgba, Sense, Stroke, TextStyle, Ui, Vec2, Visuals,
-    WidgetText,
+    vec2, Color32, Id, Rect, Response, Rgba, Sense, Stroke, TextStyle, Ui, Visuals, WidgetText, Vec2, Rounding,
 };
 
 use super::{ResizeState, SimplificationOptions, Tile, TileId, Tiles, UiResponse};
@@ -71,17 +70,42 @@ pub trait Behavior<Pane> {
         let galley = text.into_galley(ui, Some(false), f32::INFINITY, font_id);
 
         let x_margin = self.tab_title_spacing(ui.visuals());
-        let (_, rect) = ui.allocate_space(vec2(
-            galley.size().x + 2.0 * x_margin,
+
+        let offset: Vec2 = vec2(8.0, 0.0);
+        let x_size = Vec2::splat(galley.size().y / 1.3);
+        let close_space =
+        if self.has_close_buttons() {
+            offset.x + x_size.x + ui.spacing().item_spacing.x
+        } else {
+            0.0
+        };
+
+        let (_, mut rect) = ui.allocate_space(vec2(
+            galley.size().x + 2.0 * x_margin + close_space,
             ui.available_height(),
         ));
         let response = ui.interact(rect, id, Sense::click_and_drag());
-
+        
+        let text_color = self.tab_text_color(ui.visuals(), tiles, tile_id, active);
         // Show a gap when dragged
         if ui.is_rect_visible(rect) && !is_being_dragged {
             let bg_color = self.tab_bg_color(ui.visuals(), tiles, tile_id, active);
             let stroke = self.tab_outline_stroke(ui.visuals(), tiles, tile_id, active);
+            
             ui.painter().rect(rect.shrink(0.5), 0.0, bg_color, stroke);
+
+            let (x_rect, x_res) = if self.has_close_buttons() {
+                let mut pos = rect.right_top();
+                pos.x -= offset.x + x_size.x / 2.0;
+                pos.y += rect.size().y / 2.0;
+                let x_rect = Rect::from_center_size(pos, x_size);
+                let response = ui
+                    .interact(x_rect, id.with("close_button"), Sense::click())
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                (x_rect, Some(response))
+            } else {
+                (Rect::NOTHING, None)
+            };
 
             if active {
                 // Make the tab name area connect with the tab ui area:
@@ -91,15 +115,41 @@ pub trait Behavior<Pane> {
                     Stroke::new(stroke.width + 1.0, bg_color),
                 );
             }
-
-            let text_color = self.tab_text_color(ui.visuals(), tiles, tile_id, active);
-            ui.painter().galley(
+            rect.set_width(rect.width() - close_space);
+            ui.painter().galley_with_color(
                 egui::Align2::CENTER_CENTER
                     .align_size_within_rect(galley.size(), rect)
                     .min,
                 galley,
                 text_color,
             );
+
+            if let Some(x_response) = &x_res {
+                if x_response.hovered() {
+                    ui.painter().rect_filled(
+                        x_rect.expand(4.0),
+                        Rounding::same(4.0),
+                        ui.style().visuals.widgets.active.bg_fill,
+                    );
+                }
+
+                if active || x_response.hovered()  {
+                    let x_rect = x_rect.shrink(1.75);
+
+                    let color = text_color;
+                    ui.painter().line_segment(
+                        [x_rect.left_top(), x_rect.right_bottom()],
+                        Stroke::new(1.0, color),
+                    );
+                    ui.painter().line_segment(
+                        [x_rect.right_top(), x_rect.left_bottom()],
+                        Stroke::new(1.0, color),
+                    );
+                }
+                if x_response.clicked() {
+                    self.on_close_requested(tiles, tile_id);
+                }   
+            }
         }
 
         self.on_tab_button(tiles, tile_id, response)
@@ -115,6 +165,20 @@ pub trait Behavior<Pane> {
             ui.label(text);
         });
     }
+
+    fn has_close_buttons(&self) -> bool {
+        false
+    }
+
+    /// Called by the default implementation of [`Self::tab_ui`] for each added button
+    fn on_close_requested(
+        &mut self,
+        _tiles: &Tiles<Pane>,
+        _tile_id: TileId,
+    ) {
+
+    }
+
 
     /// Called by the default implementation of [`Self::tab_ui`] for each added button
     fn on_tab_button(
