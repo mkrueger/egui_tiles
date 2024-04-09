@@ -4,8 +4,8 @@ use crate::behavior::EditAction;
 use crate::{ContainerInsertion, ContainerKind, UiResponse};
 
 use super::{
-    is_possible_drag, Behavior, Container, DropContext, InsertionPoint, SimplificationOptions,
-    SimplifyAction, Tile, TileId, Tiles,
+    Behavior, Container, DropContext, InsertionPoint, SimplificationOptions, SimplifyAction, Tile,
+    TileId, Tiles,
 };
 
 /// The top level type. Contains all persistent state, including layouts and sizes.
@@ -295,6 +295,7 @@ impl<Pane> Tree<Pane> {
         drop_context.on_tile(behavior, ui.style(), tile_id, rect, &tile);
 
         // Each tile gets its own `Ui`, nested inside each other, with proper clip rectangles.
+        let enabled = ui.is_enabled();
         let mut ui = egui::Ui::new(
             ui.ctx().clone(),
             ui.layer_id(),
@@ -302,10 +303,11 @@ impl<Pane> Tree<Pane> {
             rect,
             rect,
         );
+        ui.set_enabled(enabled);
         match &mut tile {
             Tile::Pane(pane) => {
                 if behavior.pane_ui(&mut ui, tile_id, pane) == UiResponse::DragStarted {
-                    ui.memory_mut(|mem| mem.set_dragged_id(tile_id.egui_id(self.id)));
+                    ui.ctx().set_dragged_id(tile_id.egui_id(self.id));
                 }
             }
             Tile::Container(container) => {
@@ -380,7 +382,6 @@ impl<Pane> Tree<Pane> {
         }
 
         if ui.input(|i| i.pointer.any_released()) {
-            ui.memory_mut(|mem| mem.stop_dragging());
             if let Some(insertion_point) = drop_context.best_insertion {
                 behavior.on_edit(EditAction::TileDropped);
                 self.move_tile(dragged_tile_id, insertion_point, false);
@@ -545,22 +546,16 @@ impl<Pane> Tree<Pane> {
 
     /// Find the currently dragged tile, if any.
     pub fn dragged_id(&self, ctx: &egui::Context) -> Option<TileId> {
-        if !is_possible_drag(ctx) {
-            // We're not sure we're dragging _at all_ yet.
-            return None;
-        }
-
         for tile_id in self.tiles.tile_ids() {
             if self.is_root(tile_id) {
                 continue; // not allowed to drag root
             }
 
-            let id = tile_id.egui_id(self.id);
-            let is_tile_being_dragged = ctx.memory(|mem| mem.is_being_dragged(id));
+            let is_tile_being_dragged = crate::is_being_dragged(ctx, self.id, tile_id);
             if is_tile_being_dragged {
                 // Abort drags on escape:
                 if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-                    ctx.memory_mut(|mem| mem.stop_dragging());
+                    ctx.stop_dragging();
                     return None;
                 }
 
